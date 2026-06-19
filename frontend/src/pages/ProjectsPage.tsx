@@ -1,5 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, FileText, FolderOpen, Plus, Upload, X } from "lucide-react";
+import {
+  ChevronDown,
+  FileText,
+  FolderOpen,
+  Plus,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import { useRef, useState } from "react";
 import { KB, ago, kbApi } from "../api/kbs";
 import { Project, ToneProfile, projectApi } from "../api/projects";
@@ -24,6 +32,7 @@ const defaultTone: ToneProfile = {
 export default function ProjectsPage() {
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
 
   const { data: projects, isLoading } = useQuery({
     queryKey: ["projects"],
@@ -71,6 +80,7 @@ export default function ProjectsPage() {
               key={project.id}
               project={project}
               kbs={kbs}
+              onDelete={() => setDeleteTarget(project)}
               onChanged={() => {
                 queryClient.invalidateQueries({ queryKey: ["projects"] });
               }}
@@ -89,6 +99,17 @@ export default function ProjectsPage() {
           }}
         />
       )}
+
+      {deleteTarget && (
+        <DeleteProjectModal
+          project={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={() => {
+            queryClient.invalidateQueries({ queryKey: ["projects"] });
+            setDeleteTarget(null);
+          }}
+        />
+      )}
     </>
   );
 }
@@ -96,10 +117,12 @@ export default function ProjectsPage() {
 function ProjectCard({
   project,
   kbs,
+  onDelete,
   onChanged,
 }: {
   project: Project;
   kbs: KB[];
+  onDelete: () => void;
   onChanged: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
@@ -107,7 +130,6 @@ function ProjectCard({
     mutationFn: (file: File) => projectApi.uploadDeck(project.id, file),
     onSuccess: onChanged,
   });
-
   const kbNames = project.knowledge_bases.map((link) => {
     const kb = kbs.find((item) => item.id === link.kb_id);
     return {
@@ -134,15 +156,26 @@ function ProjectCard({
             </div>
           </div>
         </div>
-        <Button
-          variant="secondary"
-          size="sm"
-          icon={<Upload size={14} />}
-          loading={uploadMutation.isPending}
-          onClick={() => fileRef.current?.click()}
-        >
-          Upload PPTX
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="secondary"
+            size="sm"
+            icon={<Upload size={14} />}
+            loading={uploadMutation.isPending}
+            onClick={() => fileRef.current?.click()}
+          >
+            Upload PPTX
+          </Button>
+          <Button
+            variant="danger"
+            size="sm"
+            icon={<Trash2 size={14} />}
+            onClick={onDelete}
+            aria-label={`Delete ${project.name}`}
+          >
+            Delete
+          </Button>
+        </div>
         <input
           ref={fileRef}
           type="file"
@@ -190,19 +223,31 @@ function ProjectCard({
       {project.slides.length > 0 && (
         <div className="mt-4 border-t border-gray-100 pt-4">
           <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">
-            Parsed slides
+            Parsed slides ({project.slides.length})
           </p>
-          <div className="space-y-2">
-            {project.slides.slice(0, 4).map((slide) => (
+          <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
+            {project.slides.map((slide) => (
               <div key={slide.id} className="flex items-center gap-2 text-sm">
                 <FileText size={14} className="text-gray-300 shrink-0" />
                 <span className="text-gray-500">#{slide.position}</span>
                 <span className="font-medium text-gray-800 truncate">
                   {slide.title || "Untitled slide"}
                 </span>
+                {slide.vision_summary && (
+                  <Badge variant="green">Vision ready</Badge>
+                )}
               </div>
             ))}
           </div>
+          {project.slides[0]?.vision_summary && (
+            <p className="text-xs text-gray-500 mt-3 line-clamp-2">
+              Vision summaries are ready for all{" "}
+              {
+                project.slides.filter((slide) => slide.vision_summary).length
+              }{" "}
+              parsed slides.
+            </p>
+          )}
         </div>
       )}
 
@@ -212,6 +257,56 @@ function ProjectCard({
         </p>
       )}
     </div>
+  );
+}
+
+function DeleteProjectModal({
+  project,
+  onClose,
+  onDeleted,
+}: {
+  project: Project;
+  onClose: () => void;
+  onDeleted: () => void;
+}) {
+  const deleteMutation = useMutation({
+    mutationFn: () => projectApi.delete(project.id),
+    onSuccess: onDeleted,
+  });
+
+  return (
+    <Modal
+      title="Delete Project"
+      onClose={onClose}
+      size="sm"
+      footer={
+        <>
+          <Button variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            variant="danger"
+            loading={deleteMutation.isPending}
+            icon={<Trash2 size={14} />}
+            onClick={() => deleteMutation.mutate()}
+          >
+            Delete
+          </Button>
+        </>
+      }
+    >
+      <p className="text-sm text-gray-600">
+        Delete{" "}
+        <span className="font-semibold text-gray-900">{project.name}</span>?
+        This removes the project, uploaded deck, parsed slides, and vision
+        summaries from the database.
+      </p>
+      {deleteMutation.error && (
+        <p className="text-xs text-red-500 mt-3">
+          {(deleteMutation.error as Error).message}
+        </p>
+      )}
+    </Modal>
   );
 }
 

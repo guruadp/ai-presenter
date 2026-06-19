@@ -43,6 +43,8 @@ export interface ProjectSlide {
   body: string;
   notes: string;
   image_path: string | null;
+  vision_summary: string;
+  generation_context: Record<string, unknown>;
   created_at: string;
 }
 
@@ -67,6 +69,8 @@ export interface ProjectCreate {
 export const projectApi = {
   list: () => request<Project[]>("/projects"),
   create: (body: ProjectCreate) => json<Project>("/projects", "POST", body),
+  delete: (projectId: string) =>
+    request<void>(`/projects/${projectId}`, { method: "DELETE" }),
   uploadDeck: (projectId: string, file: File) => {
     const form = new FormData();
     form.append("file", file);

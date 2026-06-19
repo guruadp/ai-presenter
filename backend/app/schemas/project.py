@@ -44,6 +44,8 @@ class ProjectSlideOut(BaseModel):
     body: str
     notes: str
     image_path: Optional[str] = None
+    vision_summary: str = ""
+    generation_context: dict = Field(default_factory=dict)
     created_at: datetime
 
     model_config = {"from_attributes": True}

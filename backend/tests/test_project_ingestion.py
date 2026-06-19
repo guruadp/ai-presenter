@@ -125,6 +125,13 @@ def test_upload_deck_parses_ordered_slides_and_images(client, tmp_path, monkeypa
     assert slides[1]["title"] == "Evidence"
     assert all(slide["image_path"] for slide in slides)
     assert all(os.path.exists(slide["image_path"]) for slide in slides)
+    assert all(slide["vision_summary"] for slide in slides)
+    assert slides[0]["generation_context"]["extracted_text"]["title"] == "Welcome"
+    assert slides[0]["generation_context"]["vision_summary"] == slides[0]["vision_summary"]
+    assert (
+        slides[0]["generation_context"]["merge_policy"]["exact_data_source"]
+        == "extracted_text"
+    )
 
     get_settings.cache_clear()
 

@@ -10,7 +10,7 @@ from app.database import get_db
 from app.models.knowledge_base import KnowledgeBase
 from app.models.project import Project, ProjectKnowledgeBase, ProjectSlide
 from app.schemas.project import ProjectCreate, ProjectOut, ProjectSlideOut, ProjectUpdate
-from app.services import deck_ingestion
+from app.services import deck_ingestion, slide_vision
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -125,6 +125,7 @@ async def upload_deck(project_id: str, db: DbDep, file: UploadFile = File(...)) 
     project.slides.clear()
     db.flush()
     for parsed_slide, image_path in zip(parsed_slides, image_paths):
+        vision_summary = slide_vision.summarize_slide_image(image_path, parsed_slide)
         project.slides.append(
             ProjectSlide(
                 position=parsed_slide.position,
@@ -132,6 +133,11 @@ async def upload_deck(project_id: str, db: DbDep, file: UploadFile = File(...)) 
                 body=parsed_slide.body,
                 notes=parsed_slide.notes,
                 image_path=image_path,
+                vision_summary=vision_summary,
+                generation_context=slide_vision.build_generation_context(
+                    parsed_slide,
+                    vision_summary,
+                ),
             )
         )
 

@@ -74,6 +74,8 @@ class ProjectSlide(Base):
     body: Mapped[str] = mapped_column(Text, default="", nullable=False)
     notes: Mapped[str] = mapped_column(Text, default="", nullable=False)
     image_path: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    vision_summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    generation_context: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     project: Mapped["Project"] = relationship(back_populates="slides")
