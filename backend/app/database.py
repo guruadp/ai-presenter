@@ -22,6 +22,7 @@ def _get_engine():
 
 def init_db() -> None:
     from app.models import knowledge_base as _  # noqa: F401 — registers ORM models
+    from app.models import project as _project  # noqa: F401 — registers ORM models
     Base.metadata.create_all(bind=_get_engine())
 
 
