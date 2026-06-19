@@ -1,7 +1,18 @@
+import { Navigate, Route, Routes } from "react-router-dom";
+import Layout from "./components/Layout";
+import KBDetailPage from "./pages/KBDetailPage";
+import KBsPage from "./pages/KBsPage";
+import ProjectsPage from "./pages/ProjectsPage";
+
 export default function App() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-950 text-white">
-      <h1 className="text-3xl font-bold">Ednex AI Presenter</h1>
-    </div>
+    <Routes>
+      <Route path="/" element={<Layout />}>
+        <Route index element={<Navigate to="/kbs" replace />} />
+        <Route path="kbs" element={<KBsPage />} />
+        <Route path="kbs/:id" element={<KBDetailPage />} />
+        <Route path="projects" element={<ProjectsPage />} />
+      </Route>
+    </Routes>
   );
 }
