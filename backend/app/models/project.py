@@ -79,3 +79,33 @@ class ProjectSlide(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
 
     project: Mapped["Project"] = relationship(back_populates="slides")
+    script: Mapped[Optional["ProjectSlideScript"]] = relationship(
+        back_populates="slide",
+        cascade="all, delete-orphan",
+        uselist=False,
+    )
+
+
+class ProjectSlideScript(Base):
+    __tablename__ = "project_slide_scripts"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=_uuid)
+    slide_id: Mapped[str] = mapped_column(
+        String,
+        ForeignKey("project_slides.id"),
+        unique=True,
+        nullable=False,
+    )
+    status: Mapped[str] = mapped_column(String, default="draft", nullable=False)
+    narration: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    segments: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    citations: Mapped[list] = mapped_column(JSON, default=list, nullable=False)
+    duration_seconds: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    delivery_style: Mapped[dict] = mapped_column(JSON, default=dict, nullable=False)
+    running_summary: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    feedback: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now, onupdate=_now)
+
+    slide: Mapped["ProjectSlide"] = relationship(back_populates="script")

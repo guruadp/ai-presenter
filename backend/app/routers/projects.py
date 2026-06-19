@@ -3,14 +3,22 @@ import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
 from app.database import get_db
 from app.models.knowledge_base import KnowledgeBase
 from app.models.project import Project, ProjectKnowledgeBase, ProjectSlide
-from app.schemas.project import ProjectCreate, ProjectOut, ProjectSlideOut, ProjectUpdate
-from app.services import deck_ingestion, slide_vision
+from app.schemas.project import (
+    ProjectCreate,
+    ProjectOut,
+    ProjectSlideOut,
+    ProjectSlideScriptOut,
+    ProjectUpdate,
+    RegenerateScriptRequest,
+)
+from app.services import deck_ingestion, script_generation, slide_vision
 
 router = APIRouter(prefix="/projects", tags=["projects"])
 
@@ -22,6 +30,13 @@ def _get_project_or_404(project_id: str, db: Session) -> Project:
     if not project:
         raise HTTPException(404, "Project not found")
     return project
+
+
+def _get_project_slide_or_404(project: Project, slide_id: str) -> ProjectSlide:
+    for slide in project.slides:
+        if slide.id == slide_id:
+            return slide
+    raise HTTPException(404, "Slide not found")
 
 
 def _load_kbs_or_404(kb_ids: list[str], db: Session) -> list[KnowledgeBase]:
@@ -99,6 +114,52 @@ def list_slides(project_id: str, db: DbDep) -> list[ProjectSlide]:
     return project.slides
 
 
+@router.get("/{project_id}/slides/{slide_id}/image")
+def get_slide_image(project_id: str, slide_id: str, db: DbDep) -> FileResponse:
+    project = _get_project_or_404(project_id, db)
+    slide = _get_project_slide_or_404(project, slide_id)
+    if not slide.image_path or not os.path.exists(slide.image_path):
+        raise HTTPException(404, "Slide image not found")
+    return FileResponse(slide.image_path, media_type="image/png")
+
+
+@router.post("/{project_id}/scripts", response_model=ProjectOut)
+def generate_scripts(project_id: str, db: DbDep) -> Project:
+    project = _get_project_or_404(project_id, db)
+    if not project.slides:
+        raise HTTPException(400, "Upload a deck before generating scripts")
+
+    script_generation.generate_project_scripts(project, db)
+    db.add(project)
+    db.commit()
+    db.refresh(project)
+    return project
+
+
+@router.post(
+    "/{project_id}/slides/{slide_id}/script/regenerate",
+    response_model=ProjectSlideScriptOut,
+)
+def regenerate_slide_script(
+    project_id: str,
+    slide_id: str,
+    body: RegenerateScriptRequest,
+    db: DbDep,
+):
+    project = _get_project_or_404(project_id, db)
+    slide = _get_project_slide_or_404(project, slide_id)
+    options = script_generation.GenerationOptions(
+        feedback=body.feedback,
+        make_shorter=body.make_shorter,
+        more_energy=body.more_energy,
+        more_citations=body.more_citations,
+    )
+    script = script_generation.regenerate_slide_script(project, slide, db, options)
+    db.commit()
+    db.refresh(script)
+    return script
+
+
 @router.post("/{project_id}/deck", response_model=ProjectOut)
 async def upload_deck(project_id: str, db: DbDep, file: UploadFile = File(...)) -> Project:
     project = _get_project_or_404(project_id, db)
@@ -120,7 +181,7 @@ async def upload_deck(project_id: str, db: DbDep, file: UploadFile = File(...)) 
         f.write(content)
 
     image_dir = os.path.join(project_dir, "slides")
-    image_paths = deck_ingestion.render_slide_images(parsed_slides, image_dir)
+    image_paths = deck_ingestion.render_slide_images(parsed_slides, image_dir, pptx_path=deck_path)
 
     project.slides.clear()
     db.flush()

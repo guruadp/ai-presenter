@@ -36,6 +36,31 @@ class ProjectKnowledgeBaseOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class ProjectSlideScriptOut(BaseModel):
+    id: str
+    slide_id: str
+    status: str
+    narration: str
+    segments: list[dict] = Field(default_factory=list)
+    citations: list[dict] = Field(default_factory=list)
+    duration_seconds: int
+    delivery_style: dict = Field(default_factory=dict)
+    running_summary: str
+    feedback: Optional[str] = None
+    version: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class RegenerateScriptRequest(BaseModel):
+    feedback: Optional[str] = None
+    make_shorter: bool = False
+    more_energy: bool = False
+    more_citations: bool = False
+
+
 class ProjectSlideOut(BaseModel):
     id: str
     project_id: str
@@ -46,6 +71,7 @@ class ProjectSlideOut(BaseModel):
     image_path: Optional[str] = None
     vision_summary: str = ""
     generation_context: dict = Field(default_factory=dict)
+    script: Optional[ProjectSlideScriptOut] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

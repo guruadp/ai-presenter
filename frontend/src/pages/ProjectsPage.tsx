@@ -9,6 +9,7 @@ import {
   X,
 } from "lucide-react";
 import { useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { KB, ago, kbApi } from "../api/kbs";
 import { Project, ToneProfile, projectApi } from "../api/projects";
 import Badge from "../components/ui/Badge";
@@ -31,6 +32,7 @@ const defaultTone: ToneProfile = {
 
 export default function ProjectsPage() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [showCreate, setShowCreate] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
 
@@ -80,6 +82,7 @@ export default function ProjectsPage() {
               key={project.id}
               project={project}
               kbs={kbs}
+              onOpen={() => navigate(`/projects/${project.id}`)}
               onDelete={() => setDeleteTarget(project)}
               onChanged={() => {
                 queryClient.invalidateQueries({ queryKey: ["projects"] });
@@ -93,9 +96,10 @@ export default function ProjectsPage() {
         <CreateProjectModal
           kbs={kbs}
           onClose={() => setShowCreate(false)}
-          onCreated={() => {
+          onCreated={(project) => {
             queryClient.invalidateQueries({ queryKey: ["projects"] });
             setShowCreate(false);
+            navigate(`/projects/${project.id}`);
           }}
         />
       )}
@@ -117,11 +121,13 @@ export default function ProjectsPage() {
 function ProjectCard({
   project,
   kbs,
+  onOpen,
   onDelete,
   onChanged,
 }: {
   project: Project;
   kbs: KB[];
+  onOpen: () => void;
   onDelete: () => void;
   onChanged: () => void;
 }) {
@@ -139,7 +145,18 @@ function ProjectCard({
   });
 
   return (
-    <div className="bg-white border border-gray-200 rounded-xl p-5">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpen}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpen();
+        }
+      }}
+      className="bg-white border border-gray-200 rounded-xl p-5 text-left transition hover:border-indigo-200 hover:shadow-sm focus-visible:ring-2 focus-visible:ring-indigo-500"
+    >
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
           <div className="flex items-center gap-2 mb-1">
@@ -162,7 +179,10 @@ function ProjectCard({
             size="sm"
             icon={<Upload size={14} />}
             loading={uploadMutation.isPending}
-            onClick={() => fileRef.current?.click()}
+            onClick={(e) => {
+              e.stopPropagation();
+              fileRef.current?.click();
+            }}
           >
             Upload PPTX
           </Button>
@@ -170,7 +190,10 @@ function ProjectCard({
             variant="danger"
             size="sm"
             icon={<Trash2 size={14} />}
-            onClick={onDelete}
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
             aria-label={`Delete ${project.name}`}
           >
             Delete
@@ -222,30 +245,25 @@ function ProjectCard({
 
       {project.slides.length > 0 && (
         <div className="mt-4 border-t border-gray-100 pt-4">
-          <p className="text-xs font-medium text-gray-400 uppercase tracking-wide mb-2">
-            Parsed slides ({project.slides.length})
-          </p>
-          <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-            {project.slides.map((slide) => (
-              <div key={slide.id} className="flex items-center gap-2 text-sm">
-                <FileText size={14} className="text-gray-300 shrink-0" />
-                <span className="text-gray-500">#{slide.position}</span>
-                <span className="font-medium text-gray-800 truncate">
-                  {slide.title || "Untitled slide"}
-                </span>
-                {slide.vision_summary && (
-                  <Badge variant="green">Vision ready</Badge>
-                )}
-              </div>
-            ))}
+          <div className="flex items-center justify-between gap-3 mb-2">
+            <p className="text-xs font-medium text-gray-400 uppercase tracking-wide">
+              Deck progress
+            </p>
+            <Badge variant={project.slides.every((slide) => slide.script) ? "green" : "amber"}>
+              {project.slides.filter((slide) => slide.script).length} scripted
+            </Badge>
+          </div>
+          <div className="flex items-center gap-2 text-sm text-gray-600">
+            <FileText size={14} className="text-gray-300 shrink-0" />
+            <span>{project.slides.length} parsed slides</span>
+            <span className="text-gray-300">·</span>
+            <span>
+              {project.slides.filter((slide) => slide.vision_summary).length} vision ready
+            </span>
           </div>
           {project.slides[0]?.vision_summary && (
             <p className="text-xs text-gray-500 mt-3 line-clamp-2">
-              Vision summaries are ready for all{" "}
-              {
-                project.slides.filter((slide) => slide.vision_summary).length
-              }{" "}
-              parsed slides.
+              Open the project to review slides, scripts, citations, and regeneration controls.
             </p>
           )}
         </div>
@@ -317,7 +335,7 @@ function CreateProjectModal({
 }: {
   kbs: KB[];
   onClose: () => void;
-  onCreated: () => void;
+  onCreated: (project: Project) => void;
 }) {
   const [form, setForm] = useState({
     name: "",
