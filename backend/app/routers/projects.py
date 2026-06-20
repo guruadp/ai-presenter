@@ -3,7 +3,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+import tempfile
+
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
@@ -12,6 +14,7 @@ from app.database import get_db
 from app.models.knowledge_base import KnowledgeBase
 from app.models.project import Project, ProjectKnowledgeBase, ProjectSlide
 from app.schemas.project import (
+    LiveTTSRequest,
     PackageGateOut,
     ProjectCreate,
     ProjectOut,
@@ -480,3 +483,26 @@ async def upload_deck(project_id: str, db: DbDep, file: UploadFile = File(...)) 
     db.commit()
     db.refresh(project)
     return project
+
+
+@router.post("/{project_id}/show-files/{show_file_id}/tts/speak")
+def speak_live_tts(
+    project_id: str,
+    show_file_id: str,
+    body: LiveTTSRequest,
+    background_tasks: BackgroundTasks,
+    db: DbDep,
+) -> FileResponse:
+    project = _get_project_or_404(project_id, db)
+    sf = next((sf for sf in project.show_files if sf.id == show_file_id), None)
+    if not sf:
+        raise HTTPException(404, "Show File not found")
+
+    voice_id = body.voice_id or (sf.manifest or {}).get("voice_config", {}).get("voice_id")
+
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        tmp_path = tmp.name
+
+    get_tts_provider().synthesize(body.text, tmp_path, voice_id=voice_id)
+    background_tasks.add_task(os.unlink, tmp_path)
+    return FileResponse(tmp_path, media_type="audio/wav")

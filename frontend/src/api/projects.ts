@@ -234,4 +234,15 @@ export const projectApi = {
     ),
   slideImageUrl: (projectId: string, slideId: string) =>
     `${BASE}/projects/${projectId}/slides/${slideId}/image`,
+  synthesizeSpeech: (
+    projectId: string,
+    showFileId: string,
+    text: string,
+    voiceId: string | null
+  ) =>
+    requestBlob(`/projects/${projectId}/show-files/${showFileId}/tts/speak`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, voice_id: voiceId }),
+    }),
 };

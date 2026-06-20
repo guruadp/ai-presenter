@@ -116,6 +116,11 @@ class PackageGateOut(BaseModel):
     errors: list[str] = Field(default_factory=list)
 
 
+class LiveTTSRequest(BaseModel):
+    text: str
+    voice_id: Optional[str] = None
+
+
 class ProjectOut(BaseModel):
     id: str
     name: str
