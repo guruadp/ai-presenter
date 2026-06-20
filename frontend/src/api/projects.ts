@@ -147,6 +147,26 @@ export interface PackageGate {
   errors: string[];
 }
 
+export interface TranscribeResponse {
+  question: string;
+  is_empty: boolean;
+}
+
+export interface AnswerCitation {
+  source: string;
+  kb_id: string;
+  score: number;
+}
+
+export interface AnswerResponse {
+  answer: string;
+  question_type: string;
+  citations: AnswerCitation[];
+  confidence: number;
+  deferred: boolean;
+  deferred_reason: string | null;
+}
+
 export interface ProjectCreate {
   name: string;
   owner: string;
@@ -234,6 +254,33 @@ export const projectApi = {
     ),
   slideImageUrl: (projectId: string, slideId: string) =>
     `${BASE}/projects/${projectId}/slides/${slideId}/image`,
+  transcribeAudio: (projectId: string, showFileId: string, audioBlob: Blob) => {
+    const form = new FormData();
+    form.append("audio", audioBlob, "recording.webm");
+    return request<TranscribeResponse>(
+      `/projects/${projectId}/show-files/${showFileId}/qa/transcribe`,
+      { method: "POST", body: form }
+    );
+  },
+  answerQuestion: (
+    projectId: string,
+    showFileId: string,
+    question: string,
+    slideContext: string | null,
+    sessionId: string
+  ) =>
+    request<AnswerResponse>(
+      `/projects/${projectId}/show-files/${showFileId}/qa/answer`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          question,
+          slide_context: slideContext,
+          session_id: sessionId,
+        }),
+      }
+    ),
   synthesizeSpeech: (
     projectId: string,
     showFileId: string,
@@ -244,5 +291,9 @@ export const projectApi = {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text, voice_id: voiceId }),
+    }),
+  exportVideo: (projectId: string, showFileId: string) =>
+    requestBlob(`/projects/${projectId}/show-files/${showFileId}/export/video`, {
+      method: "POST",
     }),
 };

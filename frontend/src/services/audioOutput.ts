@@ -1,5 +1,7 @@
 export interface AudioOutput {
   play(url: string, onEnded: () => void): void;
+  pause(): void;
+  resume(): void;
   stop(): void;
 }
 
@@ -14,6 +16,14 @@ export class LaptopSpeaker implements AudioOutput {
     audio.onended = onEnded;
     audio.onerror = onEnded;
     audio.play().catch(onEnded);
+  }
+
+  pause(): void {
+    this.audio?.pause();
+  }
+
+  resume(): void {
+    this.audio?.play().catch(() => {});
   }
 
   stop(): void {

@@ -485,6 +485,46 @@ async def upload_deck(project_id: str, db: DbDep, file: UploadFile = File(...)) 
     return project
 
 
+@router.post("/{project_id}/show-files/{show_file_id}/export/video")
+def export_video(
+    project_id: str,
+    show_file_id: str,
+    background_tasks: BackgroundTasks,
+    db: DbDep,
+) -> FileResponse:
+    project = _get_project_or_404(project_id, db)
+    sf = next((sf for sf in project.show_files if sf.id == show_file_id), None)
+    if not sf:
+        raise HTTPException(404, "Show File not found")
+    if sf.status != "ready":
+        raise HTTPException(422, "Show File is not in ready state")
+
+    # Write to a temp file; background task deletes it after the response is sent
+    tmp = tempfile.NamedTemporaryFile(suffix=".mp4", delete=False)
+    tmp.close()
+    video_path = tmp.name
+
+    from app.services.video_export import export_show_video
+    try:
+        export_show_video(project, show_file_id, video_path)
+    except ValueError as exc:
+        os.unlink(video_path)
+        raise HTTPException(422, str(exc)) from exc
+    except RuntimeError as exc:
+        os.unlink(video_path)
+        raise HTTPException(500, str(exc)) from exc
+
+    background_tasks.add_task(os.unlink, video_path)
+    safe_name = "".join(c if c.isalnum() or c in "-_ " else "_" for c in project.name)
+    filename = f"{safe_name}_presentation.mp4"
+    return FileResponse(
+        video_path,
+        media_type="video/mp4",
+        filename=filename,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @router.post("/{project_id}/show-files/{show_file_id}/tts/speak")
 def speak_live_tts(
     project_id: str,

@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import get_settings
 from app.database import init_db
-from app.routers import knowledge_bases, projects, retrieval
+from app.routers import knowledge_bases, projects, qa, retrieval
 
 
 @asynccontextmanager
@@ -36,6 +36,7 @@ app.add_middleware(
 
 app.include_router(knowledge_bases.router)
 app.include_router(projects.router)
+app.include_router(qa.router)
 app.include_router(retrieval.router)
 
 

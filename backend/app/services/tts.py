@@ -199,10 +199,26 @@ def _run_tts_command(
 
 
 def _wav_duration(path: str) -> float:
+    """Return WAV duration in seconds.
+
+    Streaming TTS providers (e.g. OpenAI) write WAV files whose RIFF data-size
+    field is 0xFFFFFFFF, causing wave.getnframes() to return ~2^32-1 (≈89478 s
+    at 24 kHz).  Fall back to measuring from the actual file size instead.
+    """
     try:
         with wave.open(path, "rb") as wav:
-            frames = wav.getnframes()
             rate = wav.getframerate()
-            return round(frames / float(rate), 3) if rate else 0.0
+            if not rate:
+                return 0.0
+            reported = wav.getnframes()
+            # 0xFFFFFFFF is the sentinel used by streaming WAVs
+            if reported >= 0xFFFF0000:
+                channels = wav.getnchannels()
+                sampwidth = wav.getsampwidth()
+                data_bytes = max(0, os.path.getsize(path) - 44)
+                frames = data_bytes // (channels * sampwidth)
+            else:
+                frames = reported
+            return round(frames / float(rate), 3)
     except Exception:
         return 0.0
