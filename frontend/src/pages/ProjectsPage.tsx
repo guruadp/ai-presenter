@@ -1,15 +1,18 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
+  AlertCircle,
   ChevronDown,
   FileText,
   FolderOpen,
+  Play,
   Plus,
+  RefreshCw,
   Trash2,
   Upload,
   X,
 } from "lucide-react";
 import { useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { KB, ago, kbApi } from "../api/kbs";
 import { Project, ToneProfile, projectApi } from "../api/projects";
 import Badge from "../components/ui/Badge";
@@ -36,9 +39,17 @@ export default function ProjectsPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
 
-  const { data: projects, isLoading } = useQuery({
+  const {
+    data: projects,
+    error: projectsError,
+    isError: projectsIsError,
+    isLoading,
+    isFetching,
+    refetch: refetchProjects,
+  } = useQuery({
     queryKey: ["projects"],
     queryFn: projectApi.list,
+    retry: 1,
   });
 
   const { data: kbs = [] } = useQuery({
@@ -64,6 +75,25 @@ export default function ProjectsPage() {
         <div className="flex justify-center pt-20">
           <Spinner size="lg" />
         </div>
+      ) : projectsIsError ? (
+        <EmptyState
+          icon={<AlertCircle size={48} />}
+          title="Projects could not load"
+          description={
+            (projectsError as Error)?.message ||
+            "The backend API is not responding. Make sure the FastAPI server is running on port 8000."
+          }
+          action={
+            <Button
+              variant="secondary"
+              icon={<RefreshCw size={14} />}
+              loading={isFetching}
+              onClick={() => refetchProjects()}
+            >
+              Retry
+            </Button>
+          }
+        />
       ) : !projects?.length ? (
         <EmptyState
           icon={<FolderOpen size={48} />}
@@ -144,6 +174,11 @@ function ProjectCard({
     };
   });
 
+  // S12.1: latest ready ShowFile → direct "Launch Presenter" link
+  const readyShowFile = [...project.show_files]
+    .sort((a, b) => b.version - a.version)
+    .find((sf) => sf.status === "ready");
+
   return (
     <div
       role="button"
@@ -173,7 +208,18 @@ function ProjectCard({
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          {/* S12.1: Present immediately if ready Show File exists */}
+          {readyShowFile && (
+            <Link
+              to={`/present/${project.id}/${readyShowFile.id}`}
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-indigo-700"
+            >
+              <Play size={12} />
+              Present
+            </Link>
+          )}
           <Button
             variant="secondary"
             size="sm"
@@ -224,10 +270,16 @@ function ProjectCard({
         )}
       </div>
 
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4 text-sm">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4 text-sm">
         <div className="bg-gray-50 rounded-lg px-3 py-2">
           <p className="text-xs text-gray-400">Slides</p>
           <p className="font-semibold text-gray-900">{project.slides.length}</p>
+        </div>
+        <div className="bg-gray-50 rounded-lg px-3 py-2">
+          <p className="text-xs text-gray-400">Show File</p>
+          <p className={`font-semibold text-xs truncate ${readyShowFile ? "text-emerald-600" : "text-gray-400"}`}>
+            {readyShowFile ? `v${readyShowFile.version} ready` : "not packaged"}
+          </p>
         </div>
         <div className="bg-gray-50 rounded-lg px-3 py-2">
           <p className="text-xs text-gray-400">Persona</p>

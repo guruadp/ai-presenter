@@ -27,6 +27,7 @@ def init_db() -> None:
     Base.metadata.create_all(bind=engine)
     _ensure_sqlite_project_slide_columns(engine)
     _ensure_sqlite_project_slide_script_columns(engine)
+    _ensure_sqlite_epic12_columns(engine)
 
 
 def _ensure_sqlite_project_slide_columns(engine) -> None:
@@ -79,6 +80,30 @@ def _ensure_sqlite_project_slide_script_columns(engine) -> None:
         with engine.begin() as conn:
             for statement in statements:
                 conn.execute(text(statement))
+
+
+def _ensure_sqlite_epic12_columns(engine) -> None:
+    if engine.dialect.name != "sqlite":
+        return
+
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    tables = inspector.get_table_names()
+
+    # projects.deck_hash
+    if "projects" in tables:
+        cols = {c["name"] for c in inspector.get_columns("projects")}
+        if "deck_hash" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE projects ADD COLUMN deck_hash VARCHAR"))
+
+    # project_slides.content_hash
+    if "project_slides" in tables:
+        cols = {c["name"] for c in inspector.get_columns("project_slides")}
+        if "content_hash" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text("ALTER TABLE project_slides ADD COLUMN content_hash VARCHAR NOT NULL DEFAULT ''"))
 
 
 def get_db() -> Generator[Session, None, None]:

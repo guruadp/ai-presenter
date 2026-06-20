@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, computed_field
 
 
 class ToneProfile(BaseModel):
@@ -90,6 +90,7 @@ class ProjectSlideOut(BaseModel):
     image_path: Optional[str] = None
     vision_summary: str = ""
     generation_context: dict = Field(default_factory=dict)
+    content_hash: str = ""
     script: Optional[ProjectSlideScriptOut] = None
     created_at: datetime
 
@@ -129,7 +130,93 @@ class ProjectOut(BaseModel):
     knowledge_bases: list[ProjectKnowledgeBaseOut]
     slides: list[ProjectSlideOut] = []
     show_files: list[ShowFileOut] = []
+    deck_hash: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+# ── EPIC 12 schemas ───────────────────────────────────────────────────────────
+
+class PresenterSessionOut(BaseModel):
+    id: str
+    project_id: str
+    show_file_id: str
+    started_at: datetime
+    ended_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class QAEntryOut(BaseModel):
+    id: str
+    session_id: str
+    project_id: str
+    question: str
+    answer_text: str
+    question_type: str
+    confidence: float
+    deferred: bool
+    slide_index: int
+    served_from_faq: bool
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class LogQARequest(BaseModel):
+    question: str
+    answer: str
+    question_type: str = "general"
+    confidence: float = 0.0
+    deferred: bool = False
+    slide_index: int = 0
+    served_from_faq: bool = False
+
+
+class QAAnalyticsOut(BaseModel):
+    total_questions: int
+    deferred_count: int
+    deferral_rate: float
+    faq_hit_count: int
+    type_distribution: dict[str, int]
+    top_questions: list[dict]
+    per_slide_counts: dict[str, int]
+
+
+class FAQOut(BaseModel):
+    id: str
+    project_id: str
+    question: str
+    canonical_answer: str
+    question_type: str
+    promoted_from_qa: bool
+    approved: bool
+    pre_rendered_audio_path: Optional[str] = None
+    hit_count: int
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class FAQCandidateOut(BaseModel):
+    question: str
+    question_type: str
+    answer_text: str
+    confidence: float
+    occurrence_count: int
+
+
+class CreateFAQRequest(BaseModel):
+    question: str
+    canonical_answer: str
+    question_type: str = "general"
+    promoted_from_qa: bool = False
+
+
+class UpdateFAQRequest(BaseModel):
+    canonical_answer: Optional[str] = None
+    question_type: Optional[str] = None
+    approved: Optional[bool] = None

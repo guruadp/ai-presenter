@@ -396,7 +396,11 @@ async def launch_session(
     task = asyncio.create_task(session.run())
     _sessions[session_id] = (session, bus, task)
     await bus.publish_command(Command(CommandType.LOAD, {"manifest": manifest}))
-    await asyncio.sleep(0)  # yield so the LOAD command is processed
+    deadline = time.monotonic() + 1.0
+    while session.state in (OrchestratorState.IDLE, OrchestratorState.LOADING):
+        if time.monotonic() >= deadline:
+            break
+        await asyncio.sleep(0.01)
     return session
 
 

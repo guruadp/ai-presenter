@@ -2,24 +2,30 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
   Archive,
+  BarChart2,
+  BookOpen,
   Check,
   ChevronLeft,
   ChevronRight,
+  ChevronDown,
   Clock,
   Edit3,
   FileText,
   Download,
   Play,
+  Plus,
   RefreshCw,
   RotateCcw,
   Save,
   ScreenShare,
+  Sparkles,
+  Trash2,
   Upload,
   Wand2,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
-import { PackageGate, ProjectSlide, ShowFile, projectApi } from "../api/projects";
+import { FAQ, FAQCandidate, PackageGate, ProjectSlide, ShowFile, projectApi } from "../api/projects";
 import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import EmptyState from "../components/ui/EmptyState";
@@ -199,6 +205,12 @@ export default function ProjectDetailPage() {
               onChanged={() => invalidateProject(queryClient, id)}
             />
           </div>
+
+          {/* S12.3: Q&A Analytics */}
+          <QAAnalyticsPanel projectId={project.id} />
+
+          {/* S12.4: FAQ Management */}
+          <FAQPanel projectId={project.id} />
         </div>
       )}
     </>
@@ -320,10 +332,17 @@ function PackagePanel({
             )}
             <div className="mt-2 flex items-center gap-2">
               <a
+                href={`/present/${projectId}/${latest.id}`}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700"
+              >
+                <ScreenShare size={13} />
+                Launch Presenter
+              </a>
+              <a
                 href={`/viewer/${projectId}/${latest.id}`}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-white px-3 py-1.5 text-xs font-medium text-gray-700 border border-gray-300 hover:bg-gray-50"
               >
                 <ScreenShare size={13} />
                 Open Viewer
@@ -851,4 +870,378 @@ function invalidateProject(
 ) {
   queryClient.invalidateQueries({ queryKey: ["projects", id] });
   queryClient.invalidateQueries({ queryKey: ["projects"] });
+}
+
+// ── S12.3: Q&A Analytics Panel ───────────────────────────────────────────────
+
+function QAAnalyticsPanel({ projectId }: { projectId: string }) {
+  const [open, setOpen] = useState(false);
+  const { data: analytics } = useQuery({
+    queryKey: ["qa-analytics", projectId],
+    queryFn: () => projectApi.getQAAnalytics(projectId),
+    enabled: open,
+  });
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between gap-3 px-5 py-3.5 text-left hover:bg-gray-50 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <BarChart2 size={15} className="text-indigo-500" />
+          <span className="font-medium text-sm text-gray-800">Q&amp;A Analytics</span>
+          {analytics && analytics.total_questions > 0 && (
+            <span className="rounded-full bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600">
+              {analytics.total_questions} questions
+            </span>
+          )}
+        </div>
+        <ChevronDown size={15} className={`text-gray-400 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="border-t border-gray-100 p-5">
+          {!analytics || analytics.total_questions === 0 ? (
+            <p className="text-sm text-gray-400 text-center py-4">
+              No questions recorded yet. Q&amp;A history is captured live during presentations.
+            </p>
+          ) : (
+            <div className="space-y-5">
+              {/* Summary row */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  { label: "Total asked", value: analytics.total_questions },
+                  { label: "Deferred", value: analytics.deferred_count },
+                  { label: "Deferral rate", value: `${(analytics.deferral_rate * 100).toFixed(0)}%` },
+                  { label: "FAQ served", value: analytics.faq_hit_count },
+                ].map(({ label, value }) => (
+                  <div key={label} className="rounded-lg bg-gray-50 px-3 py-2">
+                    <p className="text-xs text-gray-400">{label}</p>
+                    <p className="font-semibold text-gray-900 text-sm">{value}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Type distribution */}
+              {Object.keys(analytics.type_distribution).length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+                    By type
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(analytics.type_distribution).map(([type, count]) => (
+                      <span key={type} className="rounded-full bg-indigo-50 px-2.5 py-1 text-xs text-indigo-700">
+                        {type} · {count}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Top questions */}
+              {analytics.top_questions.length > 0 && (
+                <div>
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+                    Most asked
+                  </p>
+                  <div className="space-y-1.5">
+                    {analytics.top_questions.slice(0, 5).map((q, i) => (
+                      <div key={i} className="flex items-start gap-2 rounded-lg bg-gray-50 px-3 py-2">
+                        <span className="text-xs text-gray-400 shrink-0 pt-0.5">{q.count}×</span>
+                        <p className="text-sm text-gray-800 min-w-0 break-words">{q.question}</p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── S12.4: FAQ Management Panel ──────────────────────────────────────────────
+
+function FAQPanel({ projectId }: { projectId: string }) {
+  const queryClient = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<"faqs" | "candidates">("faqs");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editAnswer, setEditAnswer] = useState("");
+
+  const { data: faqs = [], isLoading: loadingFaqs } = useQuery({
+    queryKey: ["faqs", projectId],
+    queryFn: () => projectApi.listFAQs(projectId),
+    enabled: open && tab === "faqs",
+  });
+
+  const { data: candidates = [], isLoading: loadingCandidates } = useQuery({
+    queryKey: ["faq-candidates", projectId],
+    queryFn: () => projectApi.getFAQCandidates(projectId),
+    enabled: open && tab === "candidates",
+  });
+
+  const approveMutation = useMutation({
+    mutationFn: (faqId: string) => projectApi.updateFAQ(projectId, faqId, { approved: true }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["faqs", projectId] }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (faqId: string) => projectApi.deleteFAQ(projectId, faqId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["faqs", projectId] }),
+  });
+
+  const editMutation = useMutation({
+    mutationFn: ({ id, answer }: { id: string; answer: string }) =>
+      projectApi.updateFAQ(projectId, id, { canonical_answer: answer }),
+    onSuccess: () => {
+      setEditingId(null);
+      queryClient.invalidateQueries({ queryKey: ["faqs", projectId] });
+    },
+  });
+
+  const preBakeMutation = useMutation({
+    mutationFn: (faqId: string) => projectApi.preBakeFAQ(projectId, faqId),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["faqs", projectId] }),
+  });
+
+  const promoteMutation = useMutation({
+    mutationFn: (c: FAQCandidate) =>
+      projectApi.createFAQ(projectId, {
+        question: c.question,
+        canonical_answer: c.answer_text,
+        question_type: c.question_type,
+        promoted_from_qa: true,
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["faqs", projectId] });
+      queryClient.invalidateQueries({ queryKey: ["faq-candidates", projectId] });
+    },
+  });
+
+  return (
+    <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between gap-3 px-5 py-3.5 text-left hover:bg-gray-50 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <BookOpen size={15} className="text-emerald-500" />
+          <span className="font-medium text-sm text-gray-800">FAQ Library</span>
+          {faqs.length > 0 && (
+            <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-600">
+              {faqs.filter((f) => f.approved).length} approved
+            </span>
+          )}
+        </div>
+        <ChevronDown size={15} className={`text-gray-400 transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div className="border-t border-gray-100">
+          {/* Tabs */}
+          <div className="flex gap-0 border-b border-gray-100 px-5">
+            {(["faqs", "candidates"] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={`py-2.5 px-3 text-sm font-medium border-b-2 transition-colors ${
+                  tab === t
+                    ? "border-indigo-500 text-indigo-600"
+                    : "border-transparent text-gray-500 hover:text-gray-700"
+                }`}
+              >
+                {t === "faqs" ? "Library" : "Candidates"}
+              </button>
+            ))}
+          </div>
+
+          <div className="p-5 space-y-3">
+            {tab === "faqs" && (
+              <>
+                {loadingFaqs ? (
+                  <div className="flex justify-center py-4"><Spinner /></div>
+                ) : faqs.length === 0 ? (
+                  <p className="text-sm text-gray-400 text-center py-4">
+                    No FAQs yet. Promote frequent questions from the Candidates tab or add manually.
+                  </p>
+                ) : (
+                  faqs.map((faq) => (
+                    <FAQCard
+                      key={faq.id}
+                      faq={faq}
+                      isEditing={editingId === faq.id}
+                      editAnswer={editAnswer}
+                      onEditStart={() => { setEditingId(faq.id); setEditAnswer(faq.canonical_answer); }}
+                      onEditChange={setEditAnswer}
+                      onEditSave={() => editMutation.mutate({ id: faq.id, answer: editAnswer })}
+                      onEditCancel={() => setEditingId(null)}
+                      onApprove={() => approveMutation.mutate(faq.id)}
+                      onDelete={() => deleteMutation.mutate(faq.id)}
+                      onPreBake={() => preBakeMutation.mutate(faq.id)}
+                      saving={editMutation.isPending}
+                      approving={approveMutation.isPending}
+                      baking={preBakeMutation.isPending}
+                    />
+                  ))
+                )}
+              </>
+            )}
+
+            {tab === "candidates" && (
+              <>
+                {loadingCandidates ? (
+                  <div className="flex justify-center py-4"><Spinner /></div>
+                ) : candidates.length === 0 ? (
+                  <p className="text-sm text-gray-400 text-center py-4">
+                    No candidates yet. Questions asked ≥ 2 times will appear here.
+                  </p>
+                ) : (
+                  candidates.map((c, i) => (
+                    <div key={i} className="rounded-lg border border-gray-100 bg-gray-50 p-3 space-y-2">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-medium text-gray-800 leading-snug">{c.question}</p>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <span className="text-xs text-gray-400">{c.occurrence_count}×</span>
+                          <Button
+                            size="sm"
+                            icon={<Plus size={12} />}
+                            loading={promoteMutation.isPending}
+                            onClick={() => promoteMutation.mutate(c)}
+                          >
+                            Promote
+                          </Button>
+                        </div>
+                      </div>
+                      <p className="text-xs text-gray-500 line-clamp-2">{c.answer_text}</p>
+                      <span className="text-xs text-gray-400">
+                        {c.question_type} · {(c.confidence * 100).toFixed(0)}% conf
+                      </span>
+                    </div>
+                  ))
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FAQCard({
+  faq,
+  isEditing,
+  editAnswer,
+  onEditStart,
+  onEditChange,
+  onEditSave,
+  onEditCancel,
+  onApprove,
+  onDelete,
+  onPreBake,
+  saving,
+  approving,
+  baking,
+}: {
+  faq: FAQ;
+  isEditing: boolean;
+  editAnswer: string;
+  onEditStart: () => void;
+  onEditChange: (v: string) => void;
+  onEditSave: () => void;
+  onEditCancel: () => void;
+  onApprove: () => void;
+  onDelete: () => void;
+  onPreBake: () => void;
+  saving: boolean;
+  approving: boolean;
+  baking: boolean;
+}) {
+  return (
+    <div className={`rounded-lg border p-3 space-y-2 ${faq.approved ? "border-emerald-200 bg-emerald-50/40" : "border-gray-200 bg-white"}`}>
+      <div className="flex items-start gap-2">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-gray-800 leading-snug">{faq.question}</p>
+          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
+            {faq.approved ? (
+              <span className="text-xs text-emerald-600 font-medium">✓ Approved</span>
+            ) : (
+              <span className="text-xs text-amber-600">Pending review</span>
+            )}
+            <span className="text-xs text-gray-400">·</span>
+            <span className="text-xs text-gray-400">{faq.question_type}</span>
+            {faq.hit_count > 0 && (
+              <>
+                <span className="text-xs text-gray-400">·</span>
+                <span className="text-xs text-gray-400">served {faq.hit_count}×</span>
+              </>
+            )}
+            {faq.pre_rendered_audio_path && (
+              <>
+                <span className="text-xs text-gray-400">·</span>
+                <span className="text-xs text-indigo-500">🔊 pre-baked</span>
+              </>
+            )}
+          </div>
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          {!faq.approved && (
+            <button
+              onClick={onApprove}
+              disabled={approving}
+              title="Approve"
+              className="rounded-md p-1 text-gray-400 hover:bg-emerald-50 hover:text-emerald-600"
+            >
+              <Check size={13} />
+            </button>
+          )}
+          {faq.approved && !faq.pre_rendered_audio_path && (
+            <button
+              onClick={onPreBake}
+              disabled={baking}
+              title="Pre-bake audio"
+              className="rounded-md p-1 text-gray-400 hover:bg-indigo-50 hover:text-indigo-600"
+            >
+              <Sparkles size={13} />
+            </button>
+          )}
+          <button
+            onClick={onEditStart}
+            title="Edit answer"
+            className="rounded-md p-1 text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+          >
+            <Edit3 size={13} />
+          </button>
+          <button
+            onClick={onDelete}
+            title="Delete"
+            className="rounded-md p-1 text-gray-400 hover:bg-red-50 hover:text-red-500"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+      </div>
+
+      {isEditing ? (
+        <div className="space-y-2">
+          <textarea
+            value={editAnswer}
+            onChange={(e) => onEditChange(e.target.value)}
+            rows={3}
+            className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 resize-none"
+          />
+          <div className="flex gap-2 justify-end">
+            <Button size="sm" variant="secondary" onClick={onEditCancel}>Cancel</Button>
+            <Button size="sm" loading={saving} icon={<Save size={12} />} onClick={onEditSave}>Save</Button>
+          </div>
+        </div>
+      ) : (
+        <p className="text-xs text-gray-600 line-clamp-3">{faq.canonical_answer}</p>
+      )}
+    </div>
+  );
 }

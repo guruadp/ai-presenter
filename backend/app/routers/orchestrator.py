@@ -16,7 +16,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.project import Project, ShowFile
+from app.models.project import PresenterSession, Project, QAEntry, ShowFile
+from app.schemas.project import LogQARequest, PresenterSessionOut, QAEntryOut
 from app.services.event_bus import Command, CommandType
 from app.services import orchestrator as orch_svc
 
@@ -83,6 +84,13 @@ async def create_session(body: CreateSessionRequest, db: DbDep) -> CreateSession
         manifest=sf.manifest,
         qa_budget_seconds=body.qa_budget_seconds,
     )
+    # S12.3: persist the session record so Q&A history can be linked
+    db.add(PresenterSession(
+        id=session_id,
+        project_id=body.project_id,
+        show_file_id=body.show_file_id,
+    ))
+    db.commit()
     return CreateSessionResponse(session_id=session_id, state=session.state.value)
 
 
@@ -123,12 +131,41 @@ async def send_command(session_id: str, body: SendCommandRequest) -> SendCommand
 
 
 @router.delete("/sessions/{session_id}")
-async def delete_session(session_id: str) -> dict:
+async def delete_session(session_id: str, db: DbDep) -> dict:
     session = orch_svc.get_session(session_id)
     if not session:
         raise HTTPException(404, "Session not found")
     await orch_svc.terminate_session(session_id)
+    # S12.3: mark session as ended
+    ps = db.get(PresenterSession, session_id)
+    if ps and ps.ended_at is None:
+        from datetime import datetime, timezone
+        ps.ended_at = datetime.now(timezone.utc)
+        db.commit()
     return {"status": "stopped", "session_id": session_id}
+
+
+@router.post("/sessions/{session_id}/qa-log", response_model=QAEntryOut, status_code=201)
+def log_qa_entry(session_id: str, body: LogQARequest, db: DbDep) -> QAEntry:
+    """Record a Q&A exchange that happened during an active session."""
+    ps = db.get(PresenterSession, session_id)
+    if not ps:
+        raise HTTPException(404, "Session not found")
+    entry = QAEntry(
+        session_id=session_id,
+        project_id=ps.project_id,
+        question=body.question,
+        answer_text=body.answer,
+        question_type=body.question_type,
+        confidence=body.confidence,
+        deferred=body.deferred,
+        slide_index=body.slide_index,
+        served_from_faq=body.served_from_faq,
+    )
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return entry
 
 
 @router.websocket("/sessions/{session_id}/events")

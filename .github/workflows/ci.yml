@@ -21,6 +21,7 @@ jobs:
           cache-dependency-path: backend/requirements-dev.txt
       - run: pip install -r requirements-dev.txt
       - run: pytest tests/
+      - run: python scripts/run_evals.py
         env:
           OPENAI_API_KEY: test-key
           ELEVENLABS_API_KEY: test-key

@@ -1,4 +1,6 @@
+import hashlib
 import os
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Annotated
@@ -7,13 +9,16 @@ import tempfile
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.config import get_settings
 from app.database import get_db
 from app.models.knowledge_base import KnowledgeBase
-from app.models.project import Project, ProjectKnowledgeBase, ProjectSlide
+from app.models.project import FAQ, Project, ProjectKnowledgeBase, ProjectSlide, PresenterSession, QAEntry
 from app.schemas.project import (
+    CreateFAQRequest,
+    FAQCandidateOut,
+    FAQOut,
     LiveTTSRequest,
     PackageGateOut,
     ProjectCreate,
@@ -21,11 +26,14 @@ from app.schemas.project import (
     ProjectSlideOut,
     ProjectSlideScriptOut,
     ProjectUpdate,
+    QAAnalyticsOut,
+    QAEntryOut,
     RegenerateScriptRequest,
     ScriptAudioPreviewRequest,
     ScriptEditRequest,
     ScriptReviewSettingsRequest,
     ShowFileOut,
+    UpdateFAQRequest,
 )
 from app.services import deck_ingestion, script_generation, show_file, slide_vision
 from app.services.tts import get_tts_provider
@@ -110,11 +118,15 @@ def create_project(body: ProjectCreate, db: DbDep) -> Project:
 
 @router.get("", response_model=list[ProjectOut])
 def list_projects(db: DbDep) -> list[Project]:
-    projects = db.query(Project).all()
-    for project in projects:
-        _mark_stale_scripts_for_kb_changes(project, db)
-    db.commit()
-    return projects
+    return (
+        db.query(Project)
+        .options(
+            selectinload(Project.knowledge_bases),
+            selectinload(Project.show_files),
+            selectinload(Project.slides).selectinload(ProjectSlide.script),
+        )
+        .all()
+    )
 
 
 @router.get("/{project_id}", response_model=ProjectOut)
@@ -409,6 +421,11 @@ def preview_segment_audio(
     return FileResponse(output_path, media_type="audio/wav", filename=f"slide_{slide_id}_segment_{segment_index}.wav")
 
 
+def _slide_content_hash(title: str | None, body: str, notes: str) -> str:
+    raw = f"{title or ''}\n{body}\n{notes}"
+    return hashlib.sha256(raw.encode()).hexdigest()[:20]
+
+
 @router.post("/{project_id}/deck", response_model=ProjectOut)
 async def upload_deck(project_id: str, db: DbDep, file: UploadFile = File(...)) -> Project:
     project = _get_project_or_404(project_id, db)
@@ -417,6 +434,8 @@ async def upload_deck(project_id: str, db: DbDep, file: UploadFile = File(...)) 
         raise HTTPException(400, "Only .pptx uploads are supported")
 
     content = await file.read()
+    new_deck_hash = hashlib.sha256(content).hexdigest()
+
     try:
         parsed_slides = deck_ingestion.parse_pptx(content)
     except ValueError as e:
@@ -436,30 +455,30 @@ async def upload_deck(project_id: str, db: DbDep, file: UploadFile = File(...)) 
     seen_positions = set()
     for parsed_slide, image_path in zip(parsed_slides, image_paths):
         seen_positions.add(parsed_slide.position)
-        vision_summary = slide_vision.summarize_slide_image(image_path, parsed_slide)
+        new_hash = _slide_content_hash(parsed_slide.title, parsed_slide.body, parsed_slide.notes)
         existing_slide = existing_by_position.get(parsed_slide.position)
         if existing_slide:
-            changed = (
-                existing_slide.title != parsed_slide.title
-                or existing_slide.body != parsed_slide.body
-                or existing_slide.notes != parsed_slide.notes
-            )
-            existing_slide.title = parsed_slide.title
-            existing_slide.body = parsed_slide.body
-            existing_slide.notes = parsed_slide.notes
+            # S12.2: skip expensive Vision API call when content is unchanged
+            content_changed = existing_slide.content_hash != new_hash
+            if content_changed:
+                vision_summary = slide_vision.summarize_slide_image(image_path, parsed_slide)
+                existing_slide.title = parsed_slide.title
+                existing_slide.body = parsed_slide.body
+                existing_slide.notes = parsed_slide.notes
+                existing_slide.vision_summary = vision_summary
+                existing_slide.generation_context = slide_vision.build_generation_context(
+                    parsed_slide, vision_summary,
+                )
+                existing_slide.content_hash = new_hash
+                if existing_slide.script:
+                    existing_slide.script.status = "stale"
+                    reasons = list(existing_slide.script.stale_reasons or [])
+                    reason = "Slide content changed after deck upload"
+                    if reason not in reasons:
+                        existing_slide.script.stale_reasons = [*reasons, reason]
             existing_slide.image_path = image_path
-            existing_slide.vision_summary = vision_summary
-            existing_slide.generation_context = slide_vision.build_generation_context(
-                parsed_slide,
-                vision_summary,
-            )
-            if changed and existing_slide.script:
-                existing_slide.script.status = "stale"
-                reasons = list(existing_slide.script.stale_reasons or [])
-                reason = "Slide content changed after deck upload"
-                if reason not in reasons:
-                    existing_slide.script.stale_reasons = [*reasons, reason]
         else:
+            vision_summary = slide_vision.summarize_slide_image(image_path, parsed_slide)
             project.slides.append(
                 ProjectSlide(
                     position=parsed_slide.position,
@@ -469,9 +488,9 @@ async def upload_deck(project_id: str, db: DbDep, file: UploadFile = File(...)) 
                     image_path=image_path,
                     vision_summary=vision_summary,
                     generation_context=slide_vision.build_generation_context(
-                        parsed_slide,
-                        vision_summary,
+                        parsed_slide, vision_summary,
                     ),
+                    content_hash=new_hash,
                 ),
             )
 
@@ -479,6 +498,7 @@ async def upload_deck(project_id: str, db: DbDep, file: UploadFile = File(...)) 
         if position not in seen_positions:
             db.delete(slide)
 
+    project.deck_hash = new_deck_hash
     db.add(project)
     db.commit()
     db.refresh(project)
@@ -546,3 +566,211 @@ def speak_live_tts(
     get_tts_provider().synthesize(body.text, tmp_path, voice_id=voice_id)
     background_tasks.add_task(os.unlink, tmp_path)
     return FileResponse(tmp_path, media_type="audio/wav")
+
+
+# ── EPIC 12 — S12.3 Q&A history + analytics ──────────────────────────────────
+
+@router.get("/{project_id}/qa-history", response_model=list[QAEntryOut])
+def get_qa_history(project_id: str, db: DbDep, limit: int = 200) -> list[QAEntry]:
+    _get_project_or_404(project_id, db)
+    return (
+        db.query(QAEntry)
+        .filter(QAEntry.project_id == project_id)
+        .order_by(QAEntry.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+
+@router.get("/{project_id}/qa-analytics", response_model=QAAnalyticsOut)
+def get_qa_analytics(project_id: str, db: DbDep) -> dict:
+    _get_project_or_404(project_id, db)
+    entries: list[QAEntry] = (
+        db.query(QAEntry).filter(QAEntry.project_id == project_id).all()
+    )
+    total = len(entries)
+    if total == 0:
+        return {
+            "total_questions": 0,
+            "deferred_count": 0,
+            "deferral_rate": 0.0,
+            "faq_hit_count": 0,
+            "type_distribution": {},
+            "top_questions": [],
+            "per_slide_counts": {},
+        }
+
+    deferred = sum(1 for e in entries if e.deferred)
+    faq_hits = sum(1 for e in entries if e.served_from_faq)
+
+    type_dist: dict[str, int] = {}
+    for e in entries:
+        type_dist[e.question_type] = type_dist.get(e.question_type, 0) + 1
+
+    # top questions by frequency
+    q_count: dict[str, dict] = {}
+    for e in entries:
+        key = e.question.strip().lower()
+        if key not in q_count:
+            q_count[key] = {"question": e.question, "count": 0, "question_type": e.question_type}
+        q_count[key]["count"] += 1
+    top_q = sorted(q_count.values(), key=lambda x: x["count"], reverse=True)[:10]
+
+    slide_counts: dict[str, int] = {}
+    for e in entries:
+        k = str(e.slide_index)
+        slide_counts[k] = slide_counts.get(k, 0) + 1
+
+    return {
+        "total_questions": total,
+        "deferred_count": deferred,
+        "deferral_rate": round(deferred / total, 3),
+        "faq_hit_count": faq_hits,
+        "type_distribution": type_dist,
+        "top_questions": top_q,
+        "per_slide_counts": slide_counts,
+    }
+
+
+# ── EPIC 12 — S12.4 FAQ CRUD ─────────────────────────────────────────────────
+
+def _faq_match_score(q1: str, q2: str) -> float:
+    """Jaccard similarity on word tokens (minus stop words)."""
+    _STOP = {"what", "is", "are", "the", "a", "an", "can", "do", "does", "how",
+             "why", "when", "where", "who", "will", "would", "should", "could",
+             "i", "you", "we", "they", "it", "this", "that", "about", "your"}
+
+    def tokens(s: str) -> set[str]:
+        words = re.sub(r"[^\w\s]", "", s.lower()).split()
+        return {w for w in words if w not in _STOP and len(w) > 1}
+
+    a, b = tokens(q1), tokens(q2)
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def _check_faq(project_id: str, question: str, db: Session) -> "FAQ | None":
+    """Return the best matching approved FAQ, or None."""
+    faqs = db.query(FAQ).filter(FAQ.project_id == project_id, FAQ.approved.is_(True)).all()
+    best_score, best_faq = 0.0, None
+    for faq in faqs:
+        score = _faq_match_score(question, faq.question)
+        if score > best_score:
+            best_score, best_faq = score, faq
+    if best_score >= 0.55:
+        return best_faq
+    return None
+
+
+@router.get("/{project_id}/faq-candidates", response_model=list[FAQCandidateOut])
+def get_faq_candidates(project_id: str, db: DbDep, min_occurrences: int = 2) -> list[dict]:
+    """Return questions asked ≥ min_occurrences times that are not yet FAQ entries."""
+    _get_project_or_404(project_id, db)
+    existing_faq_qs = {
+        faq.question.strip().lower()
+        for faq in db.query(FAQ).filter(FAQ.project_id == project_id).all()
+    }
+    entries: list[QAEntry] = db.query(QAEntry).filter(QAEntry.project_id == project_id).all()
+
+    # group by normalized question
+    groups: dict[str, list[QAEntry]] = {}
+    for e in entries:
+        key = e.question.strip().lower()
+        if key in existing_faq_qs:
+            continue
+        groups.setdefault(key, []).append(e)
+
+    candidates = []
+    for key, group in groups.items():
+        if len(group) < min_occurrences:
+            continue
+        # best answer = highest confidence non-deferred answer
+        best = max(group, key=lambda e: (not e.deferred, e.confidence))
+        candidates.append({
+            "question": best.question,
+            "question_type": best.question_type,
+            "answer_text": best.answer_text,
+            "confidence": best.confidence,
+            "occurrence_count": len(group),
+        })
+
+    return sorted(candidates, key=lambda c: c["occurrence_count"], reverse=True)
+
+
+@router.get("/{project_id}/faqs", response_model=list[FAQOut])
+def list_faqs(project_id: str, db: DbDep) -> list[FAQ]:
+    _get_project_or_404(project_id, db)
+    return db.query(FAQ).filter(FAQ.project_id == project_id).order_by(FAQ.created_at).all()
+
+
+@router.post("/{project_id}/faqs", response_model=FAQOut, status_code=201)
+def create_faq(project_id: str, body: CreateFAQRequest, db: DbDep) -> FAQ:
+    _get_project_or_404(project_id, db)
+    faq = FAQ(
+        project_id=project_id,
+        question=body.question,
+        canonical_answer=body.canonical_answer,
+        question_type=body.question_type,
+        promoted_from_qa=body.promoted_from_qa,
+        approved=False,
+    )
+    db.add(faq)
+    db.commit()
+    db.refresh(faq)
+    return faq
+
+
+@router.put("/{project_id}/faqs/{faq_id}", response_model=FAQOut)
+def update_faq(project_id: str, faq_id: str, body: UpdateFAQRequest, db: DbDep) -> FAQ:
+    _get_project_or_404(project_id, db)
+    faq = db.get(FAQ, faq_id)
+    if not faq or faq.project_id != project_id:
+        raise HTTPException(404, "FAQ not found")
+    if body.canonical_answer is not None:
+        faq.canonical_answer = body.canonical_answer
+    if body.question_type is not None:
+        faq.question_type = body.question_type
+    if body.approved is not None:
+        faq.approved = body.approved
+    db.commit()
+    db.refresh(faq)
+    return faq
+
+
+@router.delete("/{project_id}/faqs/{faq_id}", status_code=204)
+def delete_faq(project_id: str, faq_id: str, db: DbDep) -> None:
+    _get_project_or_404(project_id, db)
+    faq = db.get(FAQ, faq_id)
+    if not faq or faq.project_id != project_id:
+        raise HTTPException(404, "FAQ not found")
+    db.delete(faq)
+    db.commit()
+
+
+@router.post("/{project_id}/faqs/{faq_id}/pre-bake", response_model=FAQOut)
+def pre_bake_faq(
+    project_id: str,
+    faq_id: str,
+    background_tasks: BackgroundTasks,
+    db: DbDep,
+) -> FAQ:
+    project = _get_project_or_404(project_id, db)
+    faq = db.get(FAQ, faq_id)
+    if not faq or faq.project_id != project_id:
+        raise HTTPException(404, "FAQ not found")
+    if not faq.approved:
+        raise HTTPException(400, "FAQ must be approved before pre-baking audio")
+
+    settings = get_settings()
+    faq_dir = os.path.join(settings.STORAGE_DIR, "projects", project.id, "faqs")
+    os.makedirs(faq_dir, exist_ok=True)
+    audio_path = os.path.join(faq_dir, f"faq_{faq.id}.wav")
+
+    voice_id = (project.tone_profile or {}).get("voice_id")
+    get_tts_provider().synthesize(faq.canonical_answer, audio_path, voice_id=voice_id)
+
+    faq.pre_rendered_audio_path = audio_path
+    db.commit()
+    db.refresh(faq)
+    return faq

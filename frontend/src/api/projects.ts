@@ -167,6 +167,52 @@ export interface AnswerResponse {
   deferred_reason: string | null;
 }
 
+export interface QAEntry {
+  id: string;
+  session_id: string;
+  project_id: string;
+  question: string;
+  answer_text: string;
+  question_type: string;
+  confidence: number;
+  deferred: boolean;
+  slide_index: number;
+  served_from_faq: boolean;
+  created_at: string;
+}
+
+export interface QAAnalytics {
+  total_questions: number;
+  deferred_count: number;
+  deferral_rate: number;
+  faq_hit_count: number;
+  type_distribution: Record<string, number>;
+  top_questions: Array<{ question: string; count: number; question_type: string }>;
+  per_slide_counts: Record<string, number>;
+}
+
+export interface FAQ {
+  id: string;
+  project_id: string;
+  question: string;
+  canonical_answer: string;
+  question_type: string;
+  promoted_from_qa: boolean;
+  approved: boolean;
+  pre_rendered_audio_path: string | null;
+  hit_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FAQCandidate {
+  question: string;
+  question_type: string;
+  answer_text: string;
+  confidence: number;
+  occurrence_count: number;
+}
+
 export interface ProjectCreate {
   name: string;
   owner: string;
@@ -296,4 +342,29 @@ export const projectApi = {
     requestBlob(`/projects/${projectId}/show-files/${showFileId}/export/video`, {
       method: "POST",
     }),
+
+  // S12.3: Q&A history + analytics
+  getQAHistory: (projectId: string) =>
+    request<QAEntry[]>(`/projects/${projectId}/qa-history`),
+  getQAAnalytics: (projectId: string) =>
+    request<QAAnalytics>(`/projects/${projectId}/qa-analytics`),
+
+  // S12.4: FAQ CRUD
+  listFAQs: (projectId: string) =>
+    request<FAQ[]>(`/projects/${projectId}/faqs`),
+  getFAQCandidates: (projectId: string) =>
+    request<FAQCandidate[]>(`/projects/${projectId}/faq-candidates`),
+  createFAQ: (
+    projectId: string,
+    body: { question: string; canonical_answer: string; question_type: string; promoted_from_qa: boolean }
+  ) => json<FAQ>(`/projects/${projectId}/faqs`, "POST", body),
+  updateFAQ: (
+    projectId: string,
+    faqId: string,
+    body: { canonical_answer?: string; question_type?: string; approved?: boolean }
+  ) => json<FAQ>(`/projects/${projectId}/faqs/${faqId}`, "PUT", body),
+  deleteFAQ: (projectId: string, faqId: string) =>
+    request<void>(`/projects/${projectId}/faqs/${faqId}`, { method: "DELETE" }),
+  preBakeFAQ: (projectId: string, faqId: string) =>
+    json<FAQ>(`/projects/${projectId}/faqs/${faqId}/pre-bake`, "POST", {}),
 };

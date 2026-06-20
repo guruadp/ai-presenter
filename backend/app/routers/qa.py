@@ -5,7 +5,8 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.models.project import Project
+from app.models.project import FAQ, Project
+from app.routers.projects import _faq_match_score
 from app.services import qa as qa_svc
 
 router = APIRouter(prefix="/projects", tags=["qa"])
@@ -73,6 +74,25 @@ def answer_question(
     sf = next((sf for sf in project.show_files if sf.id == show_file_id), None)
     if not sf:
         raise HTTPException(404, "Show File not found")
+
+    # S12.4: Check approved FAQs before calling the LLM
+    faqs = db.query(FAQ).filter(FAQ.project_id == project_id, FAQ.approved.is_(True)).all()
+    best_score, best_faq = 0.0, None
+    for faq in faqs:
+        score = _faq_match_score(body.question, faq.question)
+        if score > best_score:
+            best_score, best_faq = score, faq
+    if best_faq and best_score >= 0.55:
+        best_faq.hit_count += 1
+        db.commit()
+        return AnswerResponse(
+            answer=best_faq.canonical_answer,
+            question_type=best_faq.question_type,
+            citations=[],
+            confidence=1.0,
+            deferred=False,
+            deferred_reason=None,
+        )
 
     kb_ids = [kb.kb_id for kb in project.knowledge_bases]
     result = qa_svc.answer_question(
