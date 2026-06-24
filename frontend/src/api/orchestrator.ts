@@ -27,6 +27,7 @@ export interface OrchestratorCursor {
 export interface CreateSessionResponse {
   session_id: string;
   state: string;
+  robot_mode: boolean;
 }
 
 export interface SessionStateResponse {
@@ -34,6 +35,7 @@ export interface SessionStateResponse {
   state: string;
   cursor: OrchestratorCursor;
   jump_stack_depth: number;
+  robot_mode: boolean;
 }
 
 export interface CommandResponse {

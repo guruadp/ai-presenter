@@ -159,6 +159,8 @@ export default function PresenterControlPage() {
 
   // ── S11.1: Session + WebSocket ───────────────────────────────────────────────
   const [sessionId, setSessionId] = useState<string | null>(null);
+  const [robotMode, setRobotMode] = useState(false);
+  const robotModeRef = useRef(false);
   const [fsmState, setFsmState] = useState("IDLE");
   const [cursor, setCursor] = useState<OrchestratorCursor>({
     slide_index: 0, segment_index: 0, sentence_index: 0,
@@ -258,6 +260,10 @@ export default function PresenterControlPage() {
       }
 
       case "play_audio": {
+        // In robot mode the backend streams audio to the G1 speaker and
+        // sends audio_complete itself — skip browser playback entirely.
+        if (robotModeRef.current) break;
+
         const context = event.payload.context as string;
         if (context === "narration") {
           const audioPath = event.payload.audio_path as string;
@@ -338,6 +344,8 @@ export default function PresenterControlPage() {
       setSessionId(resp.session_id);
       sessionIdRef.current = resp.session_id;
       setFsmState(resp.state);
+      setRobotMode(resp.robot_mode);
+      robotModeRef.current = resp.robot_mode;
 
       const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
       const wsEndpoint = `${proto}//${window.location.host}/api/orchestrator/sessions/${resp.session_id}/events`;
@@ -638,6 +646,11 @@ export default function PresenterControlPage() {
           <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${stateBadge(fsmState)}`}>
             {fsmState}
           </span>
+          {robotMode && (
+            <span className="rounded-full px-2.5 py-1 text-xs font-semibold bg-emerald-500/20 text-emerald-300">
+              🤖 Robot
+            </span>
+          )}
           <span className="text-sm text-gray-400">
             Slide {slidePosition} of {slides.length}
           </span>

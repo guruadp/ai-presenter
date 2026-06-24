@@ -17,6 +17,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { AnswerResponse, projectApi } from "../api/projects";
+import { robotApi } from "../api/robot";
 import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import Spinner from "../components/ui/Spinner";
@@ -47,6 +48,17 @@ export default function ShowViewerPage() {
     showFileId: string;
   }>();
   const navigate = useNavigate();
+
+  // ── Robot mode ─────────────────────────────────────────────────────────────
+  const [robotMode, setRobotMode] = useState(false);
+  const robotModeRef = useRef(false);
+
+  useEffect(() => {
+    robotApi.getStatus().then((s) => {
+      setRobotMode(s.enabled);
+      robotModeRef.current = s.enabled;
+    }).catch(() => {});
+  }, []);
 
   // ── Slide state ────────────────────────────────────────────────────────────
   const [index, setIndex] = useState(0);
@@ -168,9 +180,8 @@ export default function ShowViewerPage() {
     }
 
     setSegIdx(sIdx);
-    const url = projectApi.showFileAssetUrl(projectId, showFileId, seg.audio_path);
 
-    speakerRef.current.play(url, () => {
+    function onSegmentDone() {
       if (gen !== genRef.current) return; // slide changed or stopped — ignore
 
       setShowEvents((ev) => [
@@ -189,14 +200,22 @@ export default function ShowViewerPage() {
       } else if (sIdx + 1 < slide.segments.length) {
         playSegment(slide, sIdx + 1);
       } else if (autoPlayRef.current && indexRef.current < slidesLenRef.current - 1) {
-        // All segments done — pause then advance to next slide
         advanceTimerRef.current = setTimeout(() => {
           if (autoPlayRef.current) setIndex((i) => i + 1);
         }, SLIDE_GAP_MS);
       } else {
         setSegIdx(null);
       }
-    });
+    }
+
+    if (robotModeRef.current) {
+      robotApi.playAudio(projectId, showFileId, seg.audio_path)
+        .then(() => onSegmentDone())
+        .catch(() => onSegmentDone()); // on error, advance anyway
+    } else {
+      const url = projectApi.showFileAssetUrl(projectId, showFileId, seg.audio_path);
+      speakerRef.current.play(url, onSegmentDone);
+    }
   }
 
   function stopAudio() {
@@ -546,6 +565,11 @@ export default function ShowViewerPage() {
               <Badge variant={showFile.status === "ready" ? "green" : "red"}>
                 {showFile.status}
               </Badge>
+              {robotMode && (
+                <span className="rounded-full bg-emerald-500/20 px-2 py-0.5 text-xs font-medium text-emerald-300">
+                  Robot
+                </span>
+              )}
             </div>
             <p className="text-xs text-gray-400">
               Slide {current.position} of {slides.length} · {showFile.tts_provider}

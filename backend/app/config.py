@@ -21,6 +21,12 @@ class Settings(BaseSettings):
     OPENAI_TTS_TIMEOUT_SECONDS: float = 12.0
     OPENAI_TTS_MAX_RETRIES: int = 0
 
+    # Unitree G1 robot integration — set ROBOT_ENABLED=true in .env to activate
+    ROBOT_ENABLED: bool = False
+    ROBOT_NETWORK_INTERFACE: str = "enp3s0"  # NIC connected to robot (run: ip link show)
+    ROBOT_VOLUME: int = 50               # 0-100
+    ROBOT_PCM_GAIN: float = 1.0           # software amplification (1.0=none, 2.0=double)
+
 
 @lru_cache
 def get_settings() -> Settings:

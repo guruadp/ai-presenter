@@ -11,10 +11,11 @@ Session lifecycle:
 import asyncio
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, HTTPException, Request, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
+from app.config import get_settings
 from app.database import get_db
 from app.models.project import PresenterSession, Project, QAEntry, ShowFile
 from app.schemas.project import LogQARequest, PresenterSessionOut, QAEntryOut
@@ -39,6 +40,7 @@ class CreateSessionRequest(BaseModel):
 class CreateSessionResponse(BaseModel):
     session_id: str
     state: str
+    robot_mode: bool = False
 
 
 class SessionStateResponse(BaseModel):
@@ -46,6 +48,7 @@ class SessionStateResponse(BaseModel):
     state: str
     cursor: dict
     jump_stack_depth: int
+    robot_mode: bool = False
 
 
 class SendCommandRequest(BaseModel):
@@ -75,7 +78,7 @@ def _get_show_file(project_id: str, show_file_id: str, db: Session) -> "ShowFile
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 
 @router.post("/sessions", response_model=CreateSessionResponse)
-async def create_session(body: CreateSessionRequest, db: DbDep) -> CreateSessionResponse:
+async def create_session(request: Request, body: CreateSessionRequest, db: DbDep) -> CreateSessionResponse:
     import uuid
     sf = _get_show_file(body.project_id, body.show_file_id, db)
     session_id = str(uuid.uuid4())
@@ -91,19 +94,33 @@ async def create_session(body: CreateSessionRequest, db: DbDep) -> CreateSession
         show_file_id=body.show_file_id,
     ))
     db.commit()
-    return CreateSessionResponse(session_id=session_id, state=session.state.value)
+
+    # Attach robot bridge to this session's event bus if enabled
+    bridge = getattr(request.app.state, "robot_bridge", None)
+    if bridge:
+        bus = orch_svc.get_bus(session_id)
+        if bus:
+            bridge.attach(bus)
+
+    return CreateSessionResponse(
+        session_id=session_id,
+        state=session.state.value,
+        robot_mode=bridge is not None,
+    )
 
 
 @router.get("/sessions/{session_id}", response_model=SessionStateResponse)
-def get_session(session_id: str) -> SessionStateResponse:
+def get_session(request: Request, session_id: str) -> SessionStateResponse:
     session = orch_svc.get_session(session_id)
     if not session:
         raise HTTPException(404, "Session not found")
+    robot_mode = getattr(request.app.state, "robot_bridge", None) is not None
     return SessionStateResponse(
         session_id=session_id,
         state=session.state.value,
         cursor=session.cursor.to_dict(),
         jump_stack_depth=session.jump_stack_depth,
+        robot_mode=robot_mode,
     )
 
 
@@ -131,10 +148,13 @@ async def send_command(session_id: str, body: SendCommandRequest) -> SendCommand
 
 
 @router.delete("/sessions/{session_id}")
-async def delete_session(session_id: str, db: DbDep) -> dict:
+async def delete_session(request: Request, session_id: str, db: DbDep) -> dict:
     session = orch_svc.get_session(session_id)
     if not session:
         raise HTTPException(404, "Session not found")
+    bridge = getattr(request.app.state, "robot_bridge", None)
+    if bridge:
+        await bridge.detach()
     await orch_svc.terminate_session(session_id)
     # S12.3: mark session as ended
     ps = db.get(PresenterSession, session_id)
