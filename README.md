@@ -101,6 +101,7 @@ npm run dev
 
 ```bash
 sudo lsof -ti:8000,5173 | xargs -r kill -9
+npm run dev # from Root
 ```
 
 ## Test

@@ -1,0 +1,10 @@
+{
+  "name": "ednex-ai-presenter",
+  "private": true,
+  "scripts": {
+    "dev": "fuser -k 8000/tcp 5173/tcp 2>/dev/null; concurrently --names backend,frontend --prefix-colors cyan,magenta \"bash -c 'cd backend && source .venv/bin/activate && uvicorn app.main:app --reload'\" \"bash -c 'cd frontend && npm run dev'\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
